@@ -10,7 +10,6 @@ from src.agents.agent import (
 async def run_analysis(idea: str, industry: str):
     print(f"\n🚀 Starting FoundersLens Analysis for: '{idea}' in '{industry}'...\n")
 
-    # Helper to invoke ADK agents
     def call_agent(agent, prompt):
         response = agent.invoke(prompt)
         if hasattr(response, 'output'):
@@ -19,16 +18,13 @@ async def run_analysis(idea: str, industry: str):
             return response.text
         return str(response)
 
-    # Parallel Execution of Research Phase
     print("running research agents in parallel...")
     
-    # Define prompts
     pestel_prompt = f"Perform a PESTEL Analysis for the industry: {industry}. Include a Mermaid Mindmap."
     market_prompt = f"Estimate Market Size (TAM, SAM, SOM) for idea: '{idea}' in industry: '{industry}'. Include a Mermaid Pie Chart."
     competitor_prompt = f"Identify Top 5 Competitors for idea: '{idea}' in industry: '{industry}'. Include a Mermaid Quadrant Chart."
     pain_point_prompt = f"Identify Customer Pain Points for idea: '{idea}' in industry: '{industry}'. Include a Mermaid Pie Chart of complaints."
 
-    # Using asyncio.to_thread because network requests in agents are synchronous
     results = await asyncio.gather(
         asyncio.to_thread(call_agent, macro_analyst_agent, pestel_prompt),
         asyncio.to_thread(call_agent, macro_analyst_agent, market_prompt),
@@ -57,7 +53,6 @@ async def run_analysis(idea: str, industry: str):
     strategy_prompt = f"Develop a Strategy, VRIO, and Roadmap for '{idea}' based on this research: {research_context}. Include a Mermaid Timeline."
     strategy = await asyncio.to_thread(call_agent, strategy_agent, strategy_prompt)
 
-    # Output Report
     report = f"""
 # FoundersLens Report: {idea}
 
@@ -88,7 +83,6 @@ def main():
     print("Welcome to FoundersLens (CLI)")
     idea = input("1. Describe your idea: ")
     industry = input("2. Select Industry: ")
-    # custom = input("3. Any specific questions? (Optional): ")
     
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

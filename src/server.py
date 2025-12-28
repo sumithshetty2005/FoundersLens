@@ -1,18 +1,15 @@
 import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-# Import Agents and Factory
+import os
 from src.agents.agent import (
-    create_master_agent,
-    model_primary,
-    model_fallback,
+    create_agent_graph, 
     run_agent,
     model_primary_name,
     model_fallback_name
 )
 
 app = Flask(__name__)
-# Enable CORS for frontend
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route('/', methods=['GET'])
@@ -27,11 +24,11 @@ def analyze():
         
     idea = data.get('idea')
     industry = data.get('industry')
+    custom_api_key = data.get('custom_api_key') 
     extra_context = data.get('extra_context', '')
     
     print(f"\n=== Starting KPI Analysis for: {idea} ({industry}) ===")
-
-    # Prompt (Same for both models)
+    
     master_prompt = f"""
     Analyze the startup idea: '{idea}' in the '{industry}' industry. {extra_context}
     
@@ -77,43 +74,65 @@ def analyze():
     
     json_response = None
     
-    # --- ATTEMPT 1: Primary Model (Lite) ---
-    print(f"--> Invoking Master Analyst Agent (Primary: {model_primary_name})...")
-    agent_primary = create_master_agent(model_primary)
-    
-    try:
-        json_response = run_agent(agent_primary, master_prompt)
-        print("    -> Success with Primary Model.")
-    except Exception as e:
-        error_msg = str(e)
-        if "API_QUOTA_EXHAUSTED" in error_msg:
-            print(f"    -> Quota Exceeded on {model_primary_name}. Switching to Fallback...")
-            
-            # --- ATTEMPT 2: Fallback Model (Flash) ---
-            print(f"--> Invoking Master Analyst Agent (Fallback: {model_fallback_name})...")
-            agent_fallback = create_master_agent(model_fallback)
-            try:
-                json_response = run_agent(agent_fallback, master_prompt)
-                print("    -> Success with Fallback Model.")
-            except Exception as e2:
-                error_msg_2 = str(e2)
-                if "API_QUOTA_EXHAUSTED" in error_msg_2:
-                    print(f"    -> Quota Exceeded on Fallback {model_fallback_name} as well.")
-                    return jsonify({
-                        "error": "API_QUOTA_EXHAUSTED", 
-                        "message": "Daily API Quota Exceeded for ALL available models. Please check billing or try again later."
-                    }), 429
-                else:
-                    # Other error on fallback
-                    print(f"    -> Error on Fallback: {error_msg_2}")
-                    return jsonify({"error": "Agent Execution Failed", "details": error_msg_2}), 500
-        else:
-             # Other non-quota error on primary
-             print(f"    -> Error on Primary: {error_msg}")
-             return jsonify({"error": "Agent Execution Failed", "details": error_msg}), 500
+    if custom_api_key:
+        print(f"    [Debug] Received Custom Key: {custom_api_key[:4]}...{custom_api_key[-4:]}")
+
+        original_env_key = os.environ.get("GOOGLE_API_KEY")
+        os.environ["GOOGLE_API_KEY"] = custom_api_key
+
+        print(f"--> Invoking Master Analyst Agent (Custom Key: {model_fallback_name})...")
+        agent_custom = create_agent_graph(target_model_name=model_fallback_name, target_api_key=custom_api_key)
+        
+        try:
+             json_response = run_agent(agent_custom, master_prompt)
+             print("    -> Success with Custom API Key.")
+        except Exception as e:
+             error_msg = str(e)
+             print(f"    -> Error with Custom Key: {error_msg}")
+             if "API_QUOTA_EXHAUSTED" in error_msg or "429" in error_msg:
+                 return jsonify({"error": "API_QUOTA_EXHAUSTED", "message": "The provided custom API key also failed (Quota/Limit)."}), 429
+             else:
+                 return jsonify({"error": "Agent Execution Failed with Custom Key", "details": error_msg}), 500
+        finally:
+             if original_env_key:
+                 os.environ["GOOGLE_API_KEY"] = original_env_key
+             else:
+                 if "GOOGLE_API_KEY" in os.environ:
+                     del os.environ["GOOGLE_API_KEY"]
+
+    else:
+        print(f"--> Invoking Master Analyst Agent (Primary: {model_primary_name})...")
+        agent_primary = create_agent_graph(model_primary_name) 
+        
+        try:
+            json_response = run_agent(agent_primary, master_prompt)
+            print("    -> Success with Primary Model.")
+        except Exception as e:
+            error_msg = str(e)
+            if "API_QUOTA_EXHAUSTED" in error_msg:
+                print(f"    -> Quota Exceeded on {model_primary_name}. Switching to Fallback...")
+                
+                print(f"--> Invoking Master Analyst Agent (Fallback: {model_fallback_name})...")
+                agent_fallback = create_agent_graph(model_fallback_name)
+                try:
+                    json_response = run_agent(agent_fallback, master_prompt)
+                    print("    -> Success with Fallback Model.")
+                except Exception as e2:
+                    error_msg_2 = str(e2)
+                    if "API_QUOTA_EXHAUSTED" in error_msg_2:
+                        print(f"    -> Quota Exceeded on Fallback {model_fallback_name} as well.")
+                        return jsonify({
+                            "error": "API_QUOTA_EXHAUSTED", 
+                            "message": "Daily API Quota Exceeded. Please try adding your own API key."
+                        }), 429
+                    else:
+                        print(f"    -> Error on Fallback: {error_msg_2}")
+                        return jsonify({"error": "Agent Execution Failed", "details": error_msg_2}), 500
+            else:
+                 print(f"    -> Error on Primary: {error_msg}")
+                 return jsonify({"error": "Agent Execution Failed", "details": error_msg}), 500
 
     
-    # JSON Parsing Logic
     import json
     import re
     
@@ -134,7 +153,6 @@ def analyze():
             
     except Exception as e:
         print(f"JSON Parsing Failed: {e}")
-        # Return partial/error data instead of crashing
         research_data = {
             "competitors": [], 
             "opportunity": "Analysis generated invalid format.",
@@ -158,5 +176,4 @@ def analyze():
     })
 
 if __name__ == '__main__':
-    # Run Flask server
     app.run(host='0.0.0.0', port=8000, debug=True, use_reloader=False)

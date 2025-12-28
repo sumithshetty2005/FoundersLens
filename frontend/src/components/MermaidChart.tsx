@@ -20,7 +20,6 @@ const MermaidChart: React.FC<MermaidProps> = ({ chart }) => {
             if (ref.current) {
                 try {
                     ref.current.removeAttribute('data-processed');
-                    // Clear previous content handled by mermaid (if any) to prevent duplication/conflicts
                     ref.current.innerHTML = chart;
 
                     await mermaid.run({
